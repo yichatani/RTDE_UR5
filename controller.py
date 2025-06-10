@@ -10,27 +10,32 @@ class UR5_controller():
     def __init__(self):
         self.ROBOT_HOST = "192.168.20.25"
         self.scale_factor = 0.5 # Scale factor for velocity command
-        self.rtde_r, self.rtde_c, self.gripper = self.initialize_robot()
+        # self.rtde_r, self.rtde_c, self.gripper = self.initialize_robot()
+        self.rtde_r, self.rtde_c = self.initialize_robot()
+        self.width = 640
+        self.height = 480
+        self.fps = 30
         self.k4a = self.initialize_camera()
         self.realsense = self.initialize_hand_camera()
 
-        self.gripper_position = self.gripper.get_current_position()
-        self.gripper_max = self.gripper.get_max_position()
-        self.gripper_min = self.gripper.get_min_position()
+        # self.gripper_position = self.gripper.get_current_position()
+        # self.gripper_max = self.gripper.get_max_position()
+        # self.gripper_min = self.gripper.get_min_position()
 
-        # Can use to check if the grasping is success or not.
-        self.is_gripping = self.gripper.is_gripping()
+        # # Can use to check if the grasping is success or not.
+        # self.is_gripping = self.gripper.is_gripping()
 
     def initialize_robot(self): 
         rtde_r = RTDEReceiveInterface(self.ROBOT_HOST)
         rtde_c = RTDEControlInterface(self.ROBOT_HOST)
-        print("Creating gripper...")
-        gripper = robotiq_gripper.RobotiqGripper()
-        print("Connecting to gripper...")
-        gripper.connect(self.ROBOT_HOST, 63352)
-        print("Activating gripper...")
-        gripper.activate()
-        return rtde_r, rtde_c, gripper
+        # print("Creating gripper...")
+        # gripper = robotiq_gripper.RobotiqGripper()
+        # print("Connecting to gripper...")
+        # gripper.connect(self.ROBOT_HOST, 63352)
+        # print("Activating gripper...")
+        # gripper.activate()
+        # return rtde_r, rtde_c, gripper
+        return rtde_r, rtde_c
 
     # Function to get robot joint state
     def get_robot_joint_state(self):
@@ -64,10 +69,10 @@ class UR5_controller():
         
         self.gripper.move(gripper_position, 155, 255)
     
-    def move_by_joints(self,joint_positions:np.array[6]):
+    def move_by_joints(self,joint_positions):
         self.rtde_c.moveJ(joint_positions)
 
-    def move_by_tool(self, target_pose:np.array[6]):
+    def move_by_tool(self, target_pose):
         self.rtde_c.moveL(target_pose)
         
     

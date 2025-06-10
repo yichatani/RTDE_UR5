@@ -7,9 +7,9 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 from datetime import datetime
 
-ROBOT_ONLINE = False  # Set to False if the robot is not online
+ROBOT_ONLINE = True  # Set to False if the robot is not online
 
-CALIBRATION = False  # Set to True if you want to perform calibration
+CALIBRATION = True  # Set to True if you want to perform calibration
 
 def collection():
     """
@@ -25,25 +25,26 @@ def collection():
         tcp_pose = ur5.rtde_r.getActualTCPPose()
         position = tcp_pose[:3]
         rotvec = tcp_pose[3:6]
-        R_gripper2base = R.from_rotvec(rotvec).as_matrix()
+        R_base2gripper = R.from_rotvec(rotvec).as_matrix()
 
         k4a = ur5.k4a
         capture = k4a.get_capture()
         color_image = capture.color[:, :, :3]
-        depth_image = capture.transformed_depth
-        camera_matrix = np.array(k4a.calibration.get_camera_matrix("color"))
-        dist_coeffs = np.array(k4a.calibration.get_distortion_coefficients("color"))
+        # depth_image = capture.transformed_depth
+        data = np.load("calib_intrinsic_result.npz")
+        camera_matrix = data['K']
+        dist_coeffs = data['D']
 
         # === Save Images ===
-        img_dir = "/home/mainuser/UR5_yc_mh/calibration/hand_eye_clib_images"
+        img_dir = "hand_eye_calib_images"
         os.makedirs(img_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         cv2.imwrite(f"{img_dir}/color_{timestamp}.png", color_image)
-        cv2.imwrite(f"{img_dir}/depth_{timestamp}.png", depth_image)
+        # cv2.imwrite(f"{img_dir}/depth_{timestamp}.png", depth_image)
         print("Image Saved.")
 
     # === detect ArUco GridBoard ===
-    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_50)
     aruco_params = cv2.aruco.DetectorParameters()
 
     # Create GridBoard（4x3）
@@ -53,8 +54,8 @@ def collection():
         markerSeparation=0.005,  # interval is 0.5cm
         dictionary=aruco_dict
     )
-
-    exit("ArUco GridBoard created with 4x3 markers.")
+    print("ArUco GridBoard created with 4x3 markers.")
+    # exit("ArUco GridBoard created with 4x3 markers.")
 
     # detect
     gray = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
@@ -68,9 +69,8 @@ def collection():
     if not retval:
         print("ArUco board detected but pose estimation failed.")
         sys.exit(1)
-
-    R_target2cam, _ = cv2.Rodrigues(rvec)
-    t_target2cam = tvec.reshape(-1)
+    R_cam2target, _ = cv2.Rodrigues(rvec)
+    t_cam2target = tvec.reshape(-1)
 
     # === write YAML file ===
     yaml_path = "handeye_data.yaml"
@@ -79,43 +79,76 @@ def collection():
             data = yaml.safe_load(f)
     else:
         data = {
-            "R_gripper2base": [],
-            "t_gripper2base": [],
-            "R_target2cam": [],
-            "t_target2cam": []
+            "R_base2gripper": [],
+            "t_base2gripper": [],
+            "R_cam2target": [],
+            "t_cam2target": []
         }
 
-    data["R_gripper2base"].append(R_gripper2base.tolist())
-    data["t_gripper2base"].append(position)
-    data["R_target2cam"].append(R_target2cam.tolist())
-    data["t_target2cam"].append(t_target2cam.tolist())
+    data["R_base2gripper"].append(R_base2gripper.tolist())
+    data["t_base2gripper"].append(position)
+    data["R_cam2target"].append(R_cam2target.tolist())
+    data["t_cam2target"].append(t_cam2target.tolist())
 
     with open(yaml_path, "w") as f:
         yaml.dump(data, f)
 
-    print(f"Sample saved to {yaml_path}. Current total: {len(data['t_gripper2base'])}")
+    print(f"Sample saved to {yaml_path}. Current total: {len(data['t_base2gripper'])}")
 
 
 def calibration():
     """
     Performs hand-eye calibration using the collected data.
     """
-    with open("handeye_data.yaml", "r") as f:
+    with open("handeye_data_0.yaml", "r") as f:
         data = yaml.safe_load(f)
+    # target is the board
+    R_base2gripper = [np.array(R) for R in data["R_base2gripper"]]
 
-    R_gripper2base = [np.array(R) for R in data["R_gripper2base"]]
-    t_gripper2base = [np.array(t) for t in data["t_gripper2base"]]
-    R_target2cam = [np.array(R) for R in data["R_target2cam"]]
-    t_target2cam = [np.array(t) for t in data["t_target2cam"]]
+    # print(R_base2gripper[0])
+    # exit()
+    t_base2gripper = [np.array(t) for t in data["t_base2gripper"]]
 
-    R_cam2gripper, t_cam2gripper = cv2.calibrateHandEye(
+    R_gripper2base = []
+    t_gripper2base = []
+    for r,t in zip(R_base2gripper,t_base2gripper):
+        T_base2gripper = np.eye(4)
+        T_base2gripper[:3,:3] = r
+        T_base2gripper[:3,3] = t
+        T_gripper2base = np.linalg.inv(T_base2gripper)
+        R_gripper2base.append(T_gripper2base[:3,:3])
+        t_gripper2base.append(T_gripper2base[:3,3])
+        
+
+    R_cam2target = [np.array(R) for R in data["R_cam2target"]]
+    t_cam2target = [np.array(t) for t in data["t_cam2target"]]
+
+    # print(R_gripper2base[-1], t_gripper2base[-1])
+    # print(T_base2gripper)
+    # exit()
+
+
+    # R_cam2target = [R.T for R in R_target2cam]
+    # t_cam2target = [-R.T @ t for R, t in zip(R_target2cam, t_target2cam)]
+
+    # R_base2cam, t_base2cam, _, _ = cv2.calibrateRobotWorldHandEye(
+    #     R_base2gripper, t_base2gripper,
+    #     R_cam2target, t_cam2target,
+    #     method=cv2.CALIB_ROBOT_WORLD_HAND_EYE_SHAH
+    # )
+
+    R_base2cam, t_base2cam = cv2.calibrateHandEye(
         R_gripper2base, t_gripper2base,
-        R_target2cam, t_target2cam,
+        R_cam2target, t_cam2target,
         method=cv2.CALIB_HAND_EYE_TSAI
     )
+
     print("Calibration Result:")
-    print("Rotation matrix (cam2gripper):\n", R_cam2gripper)
-    print("Translation vector (cam2gripper):\n", t_cam2gripper)
+    print("Rotation matrix (base2cam):\n", R_base2cam)
+    print("Translation vector (base2cam):\n", t_base2cam)
+
+    # print("Rotation matrix (base2cam):\n", R_gripper2target)
+    # print("Translation vector (base2cam):\n", t_gripper2target)
 
 if __name__ == "__main__":
 
