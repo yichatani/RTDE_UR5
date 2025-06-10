@@ -7,9 +7,9 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 from datetime import datetime
 
-ROBOT_ONLINE = True  # Set to False if the robot is not online
+ROBOT_ONLINE = False  # Set to False if the robot is not online
 
-CALIBRATION = True  # Set to True if you want to perform calibration
+CALIBRATION = False # Set to True if you want to perform calibration
 
 def collection():
     """
@@ -31,17 +31,13 @@ def collection():
         capture = k4a.get_capture()
         color_image = capture.color[:, :, :3]
         # depth_image = capture.transformed_depth
-        data = np.load("calib_intrinsic_result.npz")
-        camera_matrix = data['K']
-        dist_coeffs = data['D']
 
-        # === Save Images ===
-        img_dir = "hand_eye_calib_images"
-        os.makedirs(img_dir, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        cv2.imwrite(f"{img_dir}/color_{timestamp}.png", color_image)
-        # cv2.imwrite(f"{img_dir}/depth_{timestamp}.png", depth_image)
-        print("Image Saved.")
+    else:
+        color_image = cv2.imread("hand_eye_calib_images/color_20250610_151329.png")
+        cv2.imshow("Image", color_image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        # exit("Robot is not online. Using a sample image instead.")
 
     # === detect ArUco GridBoard ===
     aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_50)
@@ -64,13 +60,42 @@ def collection():
     if ids is None or len(ids) == 0:
         print("No ArUco marker detected. Sample not saved.")
         sys.exit(1)
+    if len(ids) < 12:
+        print(f"Warning: Only detected {len(ids) if ids is not None else 0} markers. May be insufficient.")
+        sys.exit(1)
     # estimate pose
+    data = np.load("calib_intrinsic_result.npz")
+    camera_matrix = data['K']
+    dist_coeffs = data['D']
     retval, rvec, tvec = cv2.aruco.estimatePoseBoard(corners, ids, board, camera_matrix, dist_coeffs, None, None)
+    image_markers = cv2.aruco.drawDetectedMarkers(color_image.copy(), corners, ids)
+    
     if not retval:
         print("ArUco board detected but pose estimation failed.")
         sys.exit(1)
+    else:
+        cv2.imshow("ArUco Detection", image_markers)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        print("ArUco board detected and pose estimated successfully.")
+    
+    if ROBOT_ONLINE:
+        # === Save Images ===
+        img_dir = "hand_eye_calib_images"
+        os.makedirs(img_dir, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        cv2.imwrite(f"{img_dir}/color_{timestamp}.png", color_image)
+        # cv2.imwrite(f"{img_dir}/depth_{timestamp}.png", depth_image)
+        print("Image Saved.")
+    
+    # print(rvec)
+    # print(tvec)
     R_cam2target, _ = cv2.Rodrigues(rvec)
     t_cam2target = tvec.reshape(-1)
+    # print("R_cam2target:\n", R_cam2target)
+    # print("t_cam2target:\n", t_cam2target)
+
+    # exit()
 
     # === write YAML file ===
     yaml_path = "handeye_data.yaml"
@@ -96,11 +121,17 @@ def collection():
     print(f"Sample saved to {yaml_path}. Current total: {len(data['t_base2gripper'])}")
 
 
+def rotation_error_deg(R1, R2):
+    R_diff = R1 @ R2.T
+    angle_rad = np.arccos(np.clip((np.trace(R_diff) - 1) / 2.0, -1, 1))
+    return np.degrees(angle_rad)
+
+
 def calibration():
     """
     Performs hand-eye calibration using the collected data.
     """
-    with open("handeye_data_0.yaml", "r") as f:
+    with open("handeye_data_1.yaml", "r") as f:
         data = yaml.safe_load(f)
     # target is the board
     R_base2gripper = [np.array(R) for R in data["R_base2gripper"]]
@@ -111,44 +142,72 @@ def calibration():
 
     R_gripper2base = []
     t_gripper2base = []
+    T_base2gripper_list = []
     for r,t in zip(R_base2gripper,t_base2gripper):
         T_base2gripper = np.eye(4)
         T_base2gripper[:3,:3] = r
         T_base2gripper[:3,3] = t
+        T_base2gripper_list.append(T_base2gripper)
         T_gripper2base = np.linalg.inv(T_base2gripper)
         R_gripper2base.append(T_gripper2base[:3,:3])
         t_gripper2base.append(T_gripper2base[:3,3])
         
 
     R_cam2target = [np.array(R) for R in data["R_cam2target"]]
+    print("R_cam2target:", R_cam2target[3])
     t_cam2target = [np.array(t) for t in data["t_cam2target"]]
+    print("t_cam2target:", t_cam2target[3])
 
-    # print(R_gripper2base[-1], t_gripper2base[-1])
-    # print(T_base2gripper)
-    # exit()
+    exit()
 
+    R_target2cam = []
+    t_target2cam = []
+    T_target2cam_list = []
+    for r,t in zip(R_cam2target, t_cam2target):
+        T_cam2target = np.eye(4)
+        T_cam2target[:3,:3] = r
+        T_cam2target[:3,3] = t
+        T_target2cam = np.linalg.inv(T_cam2target)
+        T_target2cam_list.append(T_target2cam)
+        R_target2cam.append(T_target2cam[:3,:3])
+        t_target2cam.append(T_target2cam[:3,3])
 
-    # R_cam2target = [R.T for R in R_target2cam]
-    # t_cam2target = [-R.T @ t for R, t in zip(R_target2cam, t_target2cam)]
-
-    # R_base2cam, t_base2cam, _, _ = cv2.calibrateRobotWorldHandEye(
-    #     R_base2gripper, t_base2gripper,
-    #     R_cam2target, t_cam2target,
-    #     method=cv2.CALIB_ROBOT_WORLD_HAND_EYE_SHAH
-    # )
-
-    R_base2cam, t_base2cam = cv2.calibrateHandEye(
-        R_gripper2base, t_gripper2base,
-        R_cam2target, t_cam2target,
+    R_gripper2target, t_gripper2target = cv2.calibrateHandEye(
+        R_base2gripper, t_base2gripper,
+        R_target2cam, t_target2cam,
         method=cv2.CALIB_HAND_EYE_TSAI
     )
 
-    print("Calibration Result:")
-    print("Rotation matrix (base2cam):\n", R_base2cam)
-    print("Translation vector (base2cam):\n", t_base2cam)
+    T_gripper2target = np.eye(4)
+    T_gripper2target[:3, :3] = R_gripper2target
+    T_gripper2target[:3, 3] = t_gripper2target.flatten()
+    T_target2gripper = np.linalg.inv(T_gripper2target)
+    # print(T_target2gripper)
 
-    # print("Rotation matrix (base2cam):\n", R_gripper2target)
-    # print("Translation vector (base2cam):\n", t_gripper2target)
+    # R_cam2base, t_cam2base, R_target2gripper, t_target2gripper = cv2.calibrateRobotWorldHandEye(
+    #     R_target2cam, t_target2cam,     # This is A: Camera observes target
+    #     R_gripper2base, t_gripper2base, # This is B: Robot base to gripper
+    #     method=cv2.CALIB_ROBOT_WORLD_HAND_EYE_SHAH # SHAH is a common method for this solver
+    # )
+
+    # print("R_target2gripper:", R_target2gripper)
+    # print("t_target2gripper:", t_target2gripper)
+
+    T_base2cam_0 = T_base2gripper_list[0] @ T_gripper2target @ T_target2cam_list[0]
+    print("T_base2cam:\n", T_base2cam_0)
+    R_base2cam_ref = T_base2cam_0[:3, :3]
+    t_base2cam_ref = T_base2cam_0[:3, 3]
+
+    for i in range(len(T_base2gripper_list)):
+        T_est = T_base2gripper_list[i] @ T_gripper2target @ T_target2cam_list[i]
+        R_est, t_est = T_est[:3, :3], T_est[:3, 3]
+        
+        rot_err = rotation_error_deg(R_est, R_base2cam_ref)
+        trans_err = np.linalg.norm(t_est - t_base2cam_ref)
+
+        print(f"Pose {i}: rotation error = {rot_err:.3f} deg, translation error = {trans_err:.3f} m")
+    T_base2cam = T_base2gripper_list[3] @ T_gripper2target @ T_target2cam_list[3]
+    print("Final T_base2cam:\n", T_base2cam)
 
 if __name__ == "__main__":
 
