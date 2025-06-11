@@ -7,9 +7,9 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 from datetime import datetime
 
-ROBOT_ONLINE = False  # Set to False if the robot is not online
+ROBOT_ONLINE = True  # Set to False if the robot is not online
 
-CALIBRATION = False # Set to True if you want to perform calibration
+CALIBRATION = True # Set to True if you want to perform calibration
 
 def collection():
     """
@@ -33,7 +33,7 @@ def collection():
         # depth_image = capture.transformed_depth
 
     else:
-        color_image = cv2.imread("hand_eye_calib_images/color_20250610_151329.png")
+        color_image = cv2.imread("hand_eye_calib_images/color_20250610_150352.png")
         cv2.imshow("Image", color_image)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
@@ -43,9 +43,9 @@ def collection():
     aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_50)
     aruco_params = cv2.aruco.DetectorParameters()
 
-    # Create GridBoard（4x3）
+    # Create GridBoard（3x4）
     board = cv2.aruco.GridBoard(
-        size=(4, 3),              
+        size=(3, 4),              
         markerLength=0.05,       # Every marker is 5cm
         markerSeparation=0.005,  # interval is 0.5cm
         dictionary=aruco_dict
@@ -74,17 +74,20 @@ def collection():
         print("ArUco board detected but pose estimation failed.")
         sys.exit(1)
     else:
+        cv2.drawFrameAxes(image_markers, camera_matrix, dist_coeffs, rvec, tvec, 0.05)
         cv2.imshow("ArUco Detection", image_markers)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
         print("ArUco board detected and pose estimated successfully.")
+        # exit()
     
     if ROBOT_ONLINE:
         # === Save Images ===
         img_dir = "hand_eye_calib_images"
         os.makedirs(img_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        cv2.imwrite(f"{img_dir}/color_{timestamp}.png", color_image)
+        # cv2.imwrite(f"{img_dir}/color_{timestamp}.png", color_image)
+        cv2.imwrite(f"{img_dir}/color_{timestamp}.png", image_markers)
         # cv2.imwrite(f"{img_dir}/depth_{timestamp}.png", depth_image)
         print("Image Saved.")
     
@@ -131,7 +134,7 @@ def calibration():
     """
     Performs hand-eye calibration using the collected data.
     """
-    with open("handeye_data_1.yaml", "r") as f:
+    with open("handeye_data.yaml", "r") as f:
         data = yaml.safe_load(f)
     # target is the board
     R_base2gripper = [np.array(R) for R in data["R_base2gripper"]]
@@ -158,7 +161,7 @@ def calibration():
     t_cam2target = [np.array(t) for t in data["t_cam2target"]]
     print("t_cam2target:", t_cam2target[3])
 
-    exit()
+    # exit()
 
     R_target2cam = []
     t_target2cam = []
@@ -215,3 +218,40 @@ if __name__ == "__main__":
         collection()
     else:
         calibration()
+
+
+# (calibrate_env) mainuser@mainuser:~/UR5_yc_mh/RTDE_UR5$ /home/mainuser/UR5_yc_mh/env/calibrate_env/bin/python3 /home/mainuser/UR5_yc_mh/RTDE_UR5/handeye_calibration.py
+# R_cam2target: [[-0.18497348  0.98271865  0.00699084]
+#  [-0.92063975 -0.17079113 -0.35107384]
+#  [-0.34381283 -0.07137539  0.93632168]]
+# t_cam2target: [-0.07178378  0.13203476  0.37125884]
+# T_base2cam:
+#  [[ 0.01802415 -0.8643879   0.50250243 -0.46610083]
+#  [-0.99983573 -0.01462241  0.01070992 -0.28820847]
+#  [-0.00190973 -0.50261292 -0.86450946  0.53767147]
+#  [ 0.          0.          0.          1.        ]]
+# Pose 0: rotation error = 0.000 deg, translation error = 0.000 m
+# Pose 1: rotation error = 0.280 deg, translation error = 0.001 m
+# Pose 2: rotation error = 0.063 deg, translation error = 0.000 m
+# Pose 3: rotation error = 0.162 deg, translation error = 0.001 m
+# Pose 4: rotation error = 0.253 deg, translation error = 0.003 m
+# Pose 5: rotation error = 0.304 deg, translation error = 0.001 m
+# Pose 6: rotation error = 0.458 deg, translation error = 0.001 m
+# Pose 7: rotation error = 0.330 deg, translation error = 0.000 m
+# Pose 8: rotation error = 0.368 deg, translation error = 0.002 m
+# Pose 9: rotation error = 0.413 deg, translation error = 0.005 m
+# Pose 10: rotation error = 0.334 deg, translation error = 0.002 m
+# Pose 11: rotation error = 0.253 deg, translation error = 0.002 m
+# Pose 12: rotation error = 0.476 deg, translation error = 0.003 m
+# Pose 13: rotation error = 0.408 deg, translation error = 0.002 m
+# Pose 14: rotation error = 0.355 deg, translation error = 0.002 m
+# Pose 15: rotation error = 0.442 deg, translation error = 0.002 m
+# Pose 16: rotation error = 0.240 deg, translation error = 0.001 m
+# Pose 17: rotation error = 0.353 deg, translation error = 0.001 m
+# Pose 18: rotation error = 0.312 deg, translation error = 0.001 m
+# Pose 19: rotation error = 0.475 deg, translation error = 0.003 m
+# Final T_base2cam:
+#  [[ 0.02083776 -0.86426403  0.50260668 -0.46570169]
+#  [-0.99978126 -0.01711065  0.01202747 -0.28900924]
+#  [-0.00179498 -0.50274737 -0.86443153  0.5371946 ]
+#  [ 0.          0.          0.          1.        ]]
